@@ -5,114 +5,158 @@
  * @format
  */
 
-import React from 'react';
-import type {PropsWithChildren} from 'react';
-import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  View,
-} from 'react-native';
+import React, {useEffect, useState} from 'react';
+import {Alert, Button, SafeAreaView, Text} from 'react-native';
+
+import {Amplify} from 'aws-amplify';
 
 import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+  getBadgeCount,
+  getPermissionStatus,
+  initializePushNotifications,
+  onNotificationOpened,
+  onNotificationReceivedInBackground,
+  onNotificationReceivedInForeground,
+  setBadgeCount,
+} from 'aws-amplify/push-notifications';
+import {requestPermissions} from 'aws-amplify/push-notifications';
+import {onTokenReceived} from 'aws-amplify/push-notifications';
+import {signOut} from 'aws-amplify/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import awsMobile from './aws-exports';
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
+Amplify.configure(awsMobile);
+initializePushNotifications();
 
-function Section({children, title}: SectionProps): JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
+async function handlePermissions() {
+  const status = await getPermissionStatus();
+  if (status === 'granted') {
+    // no further action is required, user has already granted permissions
+    Alert.alert('Permission granted');
+    return;
+  }
+  if (status === 'denied') {
+    // further attempts to request permissions will no longer do anything
+    // myFunctionToGracefullyDegradeMyApp();
+    return;
+  }
+  if (status === 'shouldRequest') {
+    // go ahead and request permissions from the user
+    await requestPermissions();
+  }
+  if (status === 'shouldExplainThenRequest') {
+    // you should display some explanation to your user before requesting permissions
+    // await myFunctionExplainingPermissionsRequest();
+    // then request permissions
+    await requestPermissions();
+  }
 }
 
-function App(): JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+function App(): React.JSX.Element {
+  useEffect(() => {
+    onTokenReceived(token => {
+      console.log('token: ', token);
+      settoken(token);
+    });
+  }, []);
 
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-  };
+  const [deviceToken, settoken] = useState('');
+  const [notificationOpened, setNotificationOpened] = useState('');
+  const [notificationForeground, setNotificationForeground] = useState('');
+  const [notificationBackground, setNotificationBackground] = useState('');
 
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
+    <SafeAreaView
+      style={{
+        paddingTop: 100,
+        alignContent: 'center',
+        alignItems: 'center',
+        alignSelf: 'center',
+        backgroundColor: 'white',
+      }}>
+      <Button
+        title="Check endpoint ID"
+        onPress={async () => {
+          const {appId} =
+            Amplify.getConfig().Notifications?.PushNotification?.Pinpoint!;
+          console.log('appId', appId);
+          const endpointId = await AsyncStorage.getItem(
+            `aws-amplify-cachePushNotification:pinpoint:${appId}`,
+          );
+          console.log('endpointId', endpointId);
+        }}
       />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
+      <Button title="Request permission" onPress={handlePermissions} />
+      <Button
+        title="Listen to notification opened events"
+        onPress={() => {
+          onNotificationOpened(notification => {
+            setNotificationOpened(
+              `Notification opened with title: ${notification.title ?? ''}`,
+            );
+          });
+        }}
+      />
+      <Text>{notificationOpened}</Text>
+      <Button
+        title="Listen to notification events in foreground"
+        onPress={() => {
+          onNotificationReceivedInForeground(notification => {
+            setNotificationForeground(
+              `Notification was received in foreground with title: ${
+                notification.title ?? ''
+              }`,
+            );
+          });
+        }}
+      />
+      <Text>{notificationForeground}</Text>
+      <Button
+        title="Listen to notification events in background"
+        onPress={() => {
+          onNotificationReceivedInBackground(notification => {
+            console.log(
+              `🌀 Notification was received in background with title: ${
+                notification.title ?? ''
+              }`,
+            );
+            setNotificationBackground(
+              `Notification was received in background with title: ${
+                notification.title ?? ''
+              }`,
+            );
+          });
+        }}
+      />
+      <Text>{notificationBackground}</Text>
+
+      <Text selectable={true}>{deviceToken}</Text>
+      <Button
+        title="Get badge count"
+        onPress={async () => {
+          const count = await getBadgeCount();
+          Alert.alert(`count: ${count}`);
+        }}
+      />
+      <Button
+        title="Set badge count"
+        onPress={async () => {
+          try {
+            setBadgeCount(10);
+          } catch (e) {
+            console.log('error setting badge count: ', e);
+          }
+        }}
+      />
+      <Button
+        title="Sign Out"
+        onPress={async () => {
+          const res = await signOut();
+          console.log('signOut res:', res);
+        }}
+      />
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
-  },
-});
 
 export default App;
